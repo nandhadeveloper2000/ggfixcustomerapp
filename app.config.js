@@ -9,7 +9,10 @@ const masterBase =
 export default {
   expo: {
     name: 'ggfix',
-    slug: 'ggfix-customer-app',
+    slug: 'ggfixcustomer',
+    // EAS account/organization that owns the project (from your Expo dashboard).
+    // Verify this matches expo.dev → your account. Change if different.
+    owner: 'snandhas-organization',
     version: '1.0.0',
     platforms: ['ios', 'android', 'web'],
     orientation: 'portrait',
@@ -18,6 +21,7 @@ export default {
     splash: { resizeMode: 'contain', backgroundColor: '#202124' },
     ios: {
       supportsTablet: true,
+      bundleIdentifier: 'com.ggfix.customerapp',
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           'We use your location to show pickup-enabled repair shops nearby and to set your default delivery address.',
@@ -27,6 +31,7 @@ export default {
       },
     },
     android: {
+      package: 'com.ggfix.customerapp',
       adaptiveIcon: { backgroundColor: '#202124' },
       permissions: ['ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'],
       usesCleartextTraffic: true,
@@ -52,6 +57,13 @@ export default {
       MARKETPLACE_BASE: null,
       PICKUP_BASE: null,
       ORDER_BASE: null,
+      // Required for EAS builds. Get this value by running `npx eas init`
+      // (it prints the ID), or copy it from expo.dev → your project → settings.
+      eas: {
+        projectId:
+          process.env.EAS_PROJECT_ID ||
+          '8f35a88d-28f9-4782-b138-d91817d07f19',
+      },
     },
   },
 };
