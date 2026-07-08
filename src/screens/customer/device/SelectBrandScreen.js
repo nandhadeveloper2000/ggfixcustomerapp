@@ -116,9 +116,13 @@ export default function SelectBrandScreen({ navigation, route }) {
                       elevation: 1,
                     }}
                   >
-                    <View className="h-14 w-14 rounded-2xl items-center justify-center overflow-hidden bg-white border border-border">
+                    {/* App-icon style: the logo fills the rounded tile so each
+                        brand's own artwork (incl. the dark logos that ship on a
+                        black background) reads as a clean icon instead of a
+                        black square floating on a white box. */}
+                    <View className="h-14 w-14 rounded-2xl items-center justify-center overflow-hidden border border-border">
                       {logo ? (
-                        <Image source={{ uri: logo }} style={{ width: 40, height: 40 }} resizeMode="contain" />
+                        <Image source={{ uri: logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                       ) : (
                         <View className={`h-14 w-14 items-center justify-center ${palette.bg}`}>
                           <Text className={`text-[20px] font-extrabold ${palette.text}`}>{initial}</Text>

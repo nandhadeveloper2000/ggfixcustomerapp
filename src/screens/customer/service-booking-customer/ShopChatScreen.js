@@ -1,15 +1,14 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
-  KeyboardAvoidingView,
-  Platform,
+  Keyboard,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronLeft,
   Phone,
@@ -180,6 +179,8 @@ function AudioBubbleRow({ url, mine }) {
 export default function ShopChatScreen({ navigation, route }) {
   const shopId = route?.params?.shopId;
   const isEnquiry = route?.params?.mode === 'ENQUIRY';
+  const insets = useSafeAreaInsets();
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [shop, setShop] = useState(null);
   const [thread, setThread] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -229,6 +230,21 @@ export default function ShopChatScreen({ navigation, route }) {
   };
 
   useEffect(() => { bootstrap(); }, [shopId]);
+
+  // The Android window resizes when the keyboard opens (adjustResize), so the OS
+  // itself lifts the composer above the keyboard — no KeyboardAvoidingView or
+  // manual padding needed (either would double-lift or leave a residual gap on
+  // dismiss). We only track whether the keyboard is open, to switch the
+  // composer's bottom padding (small while typing vs. nav-bar clearance closed).
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
+
+  // Constant clearance so the closed composer looks identical before and after
+  // the keyboard has been used.
+  const bottomInset = Math.max(insets.bottom, 12);
 
   // Poll every 5s for new shop replies + counterpart presence/typing.
   useEffect(() => {
@@ -410,14 +426,11 @@ export default function ShopChatScreen({ navigation, route }) {
         ) : null}
       </SafeAreaView>
 
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
-      >
+      <View className="flex-1">
         <ScrollView
           ref={scrollRef}
           className="flex-1"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 12, paddingBottom: 16 }}
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
         >
@@ -514,9 +527,12 @@ export default function ShopChatScreen({ navigation, route }) {
           )}
         </ScrollView>
 
-        {/* Composer */}
-        <View className="px-3 pt-2 pb-3 bg-card border-t border-border"
-              style={{ shadowColor: '#0F172A', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: -3 }, elevation: 8 }}>
+        {/* Composer. When the keyboard is closed, pad the bottom by the safe-area
+            inset so the white bar extends behind the nav bar and the input row
+            sits just above the nav buttons. When open, the keyboard covers that
+            area, so only a little breathing room is needed. */}
+        <View className="px-3 pt-2 bg-card border-t border-border"
+              style={{ paddingBottom: keyboardOpen ? 10 : bottomInset, shadowColor: '#0F172A', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: -3 }, elevation: 8 }}>
           {voice.recording ? (
             <View className="flex-row items-center bg-danger/10 border border-danger/30 rounded-2xl px-3 py-2">
               <View className="h-2.5 w-2.5 rounded-full bg-danger mr-2" />
@@ -573,7 +589,7 @@ export default function ShopChatScreen({ navigation, route }) {
             </View>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

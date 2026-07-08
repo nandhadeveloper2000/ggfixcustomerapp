@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Wrench,
@@ -14,17 +14,9 @@ import {
 } from 'lucide-react-native';
 import { tokens } from '../../theme/colors';
 
-// Hero artwork backing each service tile. Replace the placeholders in
-// src/assets/services/ with the real artwork; keep the same filenames.
-const SERVICE_IMAGES = {
-  repair: require('../../assets/services/repair.png'),
-  sell: require('../../assets/services/sell.png'),
-  buy: require('../../assets/services/buy.png'),
-};
-
-// Per-service visual config. Gradient palette mirrors the home-screen hero
-// verticals so the customer keeps the same colour anchors (green=Repair,
-// orange=Sell, blue=Buy) across every screen.
+// Per-service visual config. The `gradient` colours are reused as the icon /
+// badge accents so each tile keeps its colour anchor (green=Repair, orange=Sell,
+// blue=Buy, purple=Enquiry) even in the flat white-grid layout.
 const SERVICE_THEME = {
   repair: {
     title: 'Repair Service',
@@ -89,8 +81,8 @@ export default function CategoryServiceMenuScreen({ navigation, route }) {
     },
     {
       key: 'enquiry',
-      sub: 'Chat or call our support team about your device',
-      onPress: () => navigation.navigate('CustomerSupport'),
+      sub: 'Message a shop about your device',
+      onPress: () => navigation.navigate('ChatInbox'),
     },
   ];
 
@@ -140,88 +132,52 @@ export default function CategoryServiceMenuScreen({ navigation, route }) {
           </Text>
         </View>
 
-        {/* Service tiles — full-bleed gradient cards with hero artwork on
-            the right and a CTA pill on the left, like Zomato's "explore" rail. */}
-        <View className="px-4">
+        {/* Service tiles — clean white 2-column grid. Each tile keeps its
+            colour anchor through a soft-tinted icon chip + badge pill. */}
+        <View className="flex-row flex-wrap px-3">
           {options.map((o) => {
             const cfg = SERVICE_THEME[o.key];
             const Icon = cfg.Icon;
             return (
-              <Pressable
-                key={o.key}
-                onPress={o.onPress}
-                className="mb-3 active:opacity-90"
-                style={{
-                  borderRadius: 22,
-                  overflow: 'hidden',
-                  shadowColor: '#0F172A',
-                  shadowOpacity: 0.06,
-                  shadowRadius: 14,
-                  shadowOffset: { width: 0, height: 6 },
-                  elevation: 3,
-                }}
-              >
-                <LinearGradient
-                  colors={cfg.gradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={{ minHeight: 150 }}
+              <View key={o.key} style={{ width: '50%', padding: 6 }}>
+                <Pressable
+                  onPress={o.onPress}
+                  className="rounded-2xl bg-card border border-border active:opacity-90"
+                  style={{
+                    padding: 14,
+                    minHeight: 150,
+                    shadowColor: '#0F172A',
+                    shadowOpacity: 0.05,
+                    shadowRadius: 12,
+                    shadowOffset: { width: 0, height: 4 },
+                    elevation: 2,
+                  }}
                 >
-                  <View className="flex-row items-stretch p-4">
-                    <View className="flex-1 pr-3">
-                      <View
-                        className="self-start rounded-full px-2.5 py-1 mb-2 flex-row items-center"
-                        style={{ backgroundColor: 'rgba(255,255,255,0.22)' }}
-                      >
-                        <Text className="text-white text-[10px] font-extrabold" style={{ letterSpacing: 0.8 }}>
-                          {cfg.badge}
-                        </Text>
-                      </View>
-                      <Text
-                        className="text-white font-extrabold"
-                        style={{ fontSize: 18 }}
-                        numberOfLines={1}
-                      >
-                        {cfg.title}
-                      </Text>
-                      <Text
-                        className="text-white/85 text-[12px] mt-1"
-                        numberOfLines={2}
-                      >
-                        {o.sub}
-                      </Text>
-                    </View>
-                    {/* Hero artwork tile — uses the same SERVICE_IMAGES the
-                        old screen referenced so the assets stay reusable. A
-                        translucent white pad sits under the artwork to keep
-                        the gradient readable behind transparent PNGs. */}
-                    <View
-                      className="rounded-2xl items-center justify-center overflow-hidden"
-                      style={{
-                        width: 110,
-                        height: 110,
-                        backgroundColor: 'rgba(255,255,255,0.18)',
-                      }}
-                    >
-                      {SERVICE_IMAGES[o.key] ? (
-                        <Image
-                          source={SERVICE_IMAGES[o.key]}
-                          style={{ width: '100%', height: '100%' }}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <Icon size={48} color="#FFFFFF" strokeWidth={1.8} />
-                      )}
-                      <View
-                        className="absolute top-2 right-2 h-7 w-7 rounded-full items-center justify-center"
-                        style={{ backgroundColor: 'rgba(255,255,255,0.85)' }}
-                      >
-                        <Icon size={14} color={cfg.gradient[1]} />
-                      </View>
-                    </View>
+                  <View
+                    className="h-12 w-12 rounded-2xl items-center justify-center mb-3"
+                    style={{ backgroundColor: cfg.softBg }}
+                  >
+                    <Icon size={24} color={cfg.gradient[0]} strokeWidth={2} />
                   </View>
-                </LinearGradient>
-              </Pressable>
+                  <View
+                    className="self-start rounded-full px-2 py-0.5 mb-1.5"
+                    style={{ backgroundColor: cfg.softBg }}
+                  >
+                    <Text
+                      className="text-[9px] font-extrabold"
+                      style={{ color: cfg.gradient[1], letterSpacing: 0.5 }}
+                    >
+                      {cfg.badge}
+                    </Text>
+                  </View>
+                  <Text className="text-[15px] font-extrabold text-text" numberOfLines={1}>
+                    {cfg.title}
+                  </Text>
+                  <Text className="text-[11px] text-text-muted mt-0.5" numberOfLines={2}>
+                    {o.sub}
+                  </Text>
+                </Pressable>
+              </View>
             );
           })}
         </View>

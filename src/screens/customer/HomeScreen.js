@@ -12,6 +12,7 @@ import {
   Wrench,
   Repeat,
   ShoppingBag,
+  ShoppingCart,
   Smartphone,
   Laptop,
   Tablet,
@@ -25,6 +26,7 @@ import {
   Sparkles,
   MessageCircle,
   Headset,
+  ArrowRight,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar, EmptyState, Loader, ShopCard } from '../../components/rnr';
@@ -33,7 +35,7 @@ import { listNearbyShops } from '../../api/shops';
 import { listAddresses } from '../../api/customer';
 import { listMyOrders } from '../../api/orders';
 import { getUnreadCount } from '../../api/notifications';
-import { listChats } from '../../api/marketplace';
+import { listChats, getCart } from '../../api/marketplace';
 import { selectSession } from '../../store/authSlice';
 import { useCustomerLocation } from '../../hooks/useCustomerLocation';
 import { travelTimesFor } from '../../utils/travelTimes';
@@ -80,14 +82,48 @@ function imgUri(item) {
   return url || null;
 }
 
+// Hero promo carousel shown at the very top of the feed. The artwork on the
+// right of each slide is assets/hero-banner.png — swap that single file to
+// change the image for all slides (keep a transparent PNG for best results).
+const HERO_BANNER_IMAGE = require('../../../assets/hero-banner.png');
+const HERO_SLIDES = [
+  {
+    key: 'welcome',
+    title1: 'Fast. Trusted.',
+    title2: 'Tech Solutions',
+    sub: 'Repair, Buy, Sell or Pickup –\nAll in one place!',
+    cta: 'Explore Now',
+    bg: ['#DCFCE7', '#BBF7D0'],
+    route: 'Repair',
+  },
+  {
+    key: 'repair-off',
+    title1: 'Up to 30% Off',
+    title2: 'Screen Repairs',
+    sub: 'Book a doorstep repair today\nwith trusted local pros.',
+    cta: 'Book Now',
+    bg: ['#DBEAFE', '#BFDBFE'],
+    route: 'Repair',
+  },
+  {
+    key: 'sell-earn',
+    title1: 'Sell & Earn',
+    title2: 'Best Resale Value',
+    sub: 'Get an instant quote for\nyour old device.',
+    cta: 'Sell Now',
+    bg: ['#FFEDD5', '#FED7AA'],
+    route: 'Sell',
+  },
+];
+
 // Hero verticals use a marketplace-style palette: green stays the primary
 // brand signal, while each action gets a distinct soft color cue.
 const HERO_VERTICALS = [
   {
     key: 'repair',
     title: 'Repair',
-    sub: 'Doorstep & in-shop',
-    badge: 'SERVICE',
+    sub: 'Doorstep & in-shop repair service',
+    badge: null,
     icon: Wrench,
     bg: ['#FFFFFF', '#ECFDF5'],
     accent: tokens.primary,
@@ -98,7 +134,7 @@ const HERO_VERTICALS = [
   {
     key: 'sell',
     title: 'Sell',
-    sub: 'Best resale value',
+    sub: 'Get the best resale value',
     badge: 'BEST VALUE',
     icon: Repeat,
     bg: ['#FFFFFF', '#EFF6FF'],
@@ -146,12 +182,6 @@ const ENQUIRY_TILE = {
   route: 'ChatInbox',
 };
 
-const OFFERS = [
-  { key: 'off',   title: 'Up to 30% Off',   sub: 'on Screen Replacement', cta: 'Book Now',  icon: PercentCircle, tint: tokens.primary, bg: '#DCFCE7' },
-  { key: 'pick',  title: 'Free Pickup',     sub: '& Drop on all repairs', cta: 'Learn More', icon: Truck,        tint: tokens.accent,  bg: '#FFEDD5' },
-  { key: 'exch',  title: 'Exchange Bonus',  sub: 'Up to ₹3,000 extra',   cta: 'Sell Now',  icon: IndianRupee,  tint: '#B45309',      bg: '#FEF3C7' },
-];
-
 // Rotating search-bar placeholders. Mirrors Swiggy/Zomato's
 // "Search 'biryani'", "Search 'pizza'", … cycle so the search bar stays
 // alive instead of looking like a static prompt.
@@ -173,12 +203,13 @@ export default function HomeScreen({ navigation }) {
   const [ongoing, setOngoing] = useState(null);
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
+  const [cartCount, setCartCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [searchHintIdx, setSearchHintIdx] = useState(0);
 
   const load = useCallback(async () => {
     try {
-      const [s, a, c, orders, unreadCount, chats] = await Promise.all([
+      const [s, a, c, orders, unreadCount, chats, cart] = await Promise.all([
         listNearbyShops({
           lat: lat ?? undefined,
           lng: lng ?? undefined,
@@ -189,10 +220,12 @@ export default function HomeScreen({ navigation }) {
         listMyOrders({ orderType: 'REPAIR' }).catch(() => []),
         getUnreadCount().catch(() => 0),
         listChats().catch(() => []),
+        getCart().catch(() => []),
       ]);
       setShops(s);
       setUnread(unreadCount || 0);
       setChatUnread((chats || []).reduce((n, t) => n + (t.unreadCount || 0), 0));
+      setCartCount((cart || []).reduce((n, it) => n + (it.quantity || 1), 0));
       setCategories(sortByPreferredOrder((c || []).filter((x) => x.isActive !== false)));
       const def = a.find((x) => x.isDefault) || a[0] || null;
       setAddress(def);
@@ -257,9 +290,6 @@ export default function HomeScreen({ navigation }) {
   const heroPadH = 16;
   const heroTileW = Math.floor((contentW - heroPadH * 2 - heroGap * (heroCols - 1)) / heroCols);
 
-  // Offer card (horizontally scrollable)
-  const offerW = Math.round(Math.min(260, contentW * 0.66));
-
   const openCategory = (c) => navigation.navigate('CategoryServiceMenu', {
     categoryId: c.id,
     categoryCode: (c.code || '').toUpperCase(),
@@ -277,33 +307,34 @@ export default function HomeScreen({ navigation }) {
           style={{ paddingBottom: 0 }}
         >
           <View className="flex-row items-center px-4 pt-2.5 pb-2" style={centered}>
+            {/* Avatar — moved to the far left; taps through to Profile. */}
+            <Pressable
+              onPress={() => navigation.navigate('Profile')}
+              className="active:opacity-80 mr-2.5"
+            >
+              <Avatar source={session?.profileImageUrl} fallback={firstName} size={avatarSize} />
+            </Pressable>
             {/* Location pill — uppercase eyebrow + bold detail line, like
                 Swiggy's "DELIVER TO" header. */}
             <Pressable
               onPress={onLocationPress}
-              className="flex-1 flex-row items-center active:opacity-80 mr-2"
+              className="flex-1 active:opacity-80 mr-2"
             >
-              <View
-                className="h-9 w-9 rounded-full items-center justify-center mr-2"
-                style={{ backgroundColor: tokens.primarySoft }}
-              >
-                <MapPin size={16} color={tokens.primary} />
-              </View>
-              <View className="flex-1">
-                <View className="flex-row items-center">
-                  <Text className="text-[14px] font-extrabold text-text mr-1" numberOfLines={1}>
-                    {locationTop}
-                  </Text>
-                  <ChevronDown size={14} color={tokens.text} />
-                </View>
-                <Text className="text-[11px] text-text-muted mt-0.5" numberOfLines={1}>
-                  {locationDetail}
+              <View className="flex-row items-center">
+                <MapPin size={13} color={tokens.primary} style={{ marginRight: 3 }} />
+                <Text className="text-[13.5px] font-extrabold text-text mr-1" numberOfLines={1}>
+                  {locationTop}
                 </Text>
+                <ChevronDown size={13} color={tokens.text} />
               </View>
+              <Text className="text-[11px] text-text-muted mt-0.5" numberOfLines={1}>
+                {locationDetail}
+              </Text>
             </Pressable>
+            {/* Right-side actions: message, cart, notifications. */}
             <Pressable
               onPress={() => navigation.navigate('ChatInbox')}
-              className="h-10 w-10 rounded-full items-center justify-center active:opacity-80 mr-2"
+              className="h-9 w-9 rounded-full items-center justify-center active:opacity-80 mr-1.5"
               style={{ backgroundColor: tokens.surfaceMuted }}
             >
               <MessageCircle size={18} color={tokens.text} />
@@ -317,8 +348,23 @@ export default function HomeScreen({ navigation }) {
               ) : null}
             </Pressable>
             <Pressable
+              onPress={() => navigation.navigate('MyCart')}
+              className="h-9 w-9 rounded-full items-center justify-center active:opacity-80 mr-1.5"
+              style={{ backgroundColor: tokens.surfaceMuted }}
+            >
+              <ShoppingCart size={18} color={tokens.text} />
+              {cartCount > 0 ? (
+                <View
+                  className="absolute -top-0.5 -right-0.5 rounded-full min-w-[16px] h-4 px-1 items-center justify-center"
+                  style={{ backgroundColor: tokens.accent }}
+                >
+                  <Text className="text-white text-[9px] font-bold">{cartCount > 9 ? '9+' : cartCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <Pressable
               onPress={() => navigation.navigate('Notifications')}
-              className="h-10 w-10 rounded-full items-center justify-center active:opacity-80 mr-2"
+              className="h-9 w-9 rounded-full items-center justify-center active:opacity-80"
               style={{ backgroundColor: tokens.surfaceMuted }}
             >
               <Bell size={18} color={tokens.text} />
@@ -330,12 +376,6 @@ export default function HomeScreen({ navigation }) {
                   <Text className="text-white text-[9px] font-bold">{unread > 9 ? '9+' : unread}</Text>
                 </View>
               ) : null}
-            </Pressable>
-            <Pressable
-              onPress={() => navigation.navigate('Profile')}
-              className="active:opacity-80"
-            >
-              <Avatar source={session?.profileImageUrl} fallback={firstName} size={avatarSize} />
             </Pressable>
           </View>
 
@@ -367,6 +407,10 @@ export default function HomeScreen({ navigation }) {
         contentContainerStyle={{ paddingBottom: 32 }}
       >
         <View style={centered}>
+          {/* Hero promo carousel — full-bleed banner with device artwork,
+              headline, CTA and paging dots (Swiggy/Zomato top-strip vibe). */}
+          <HeroBanner navigation={navigation} contentW={contentW} />
+
           {/* Vertical hero — Repair / Sell / Buy / Pickup pill tiles in a
               2x2 grid with soft commerce colors. Green is reserved for the
               brand and primary action states. */}
@@ -390,7 +434,7 @@ export default function HomeScreen({ navigation }) {
                     style={{
                       borderRadius: 18,
                       padding: 14,
-                      minHeight: 112,
+                      minHeight: 124,
                       borderWidth: 1,
                       borderColor: v.border,
                       overflow: 'hidden',
@@ -403,25 +447,39 @@ export default function HomeScreen({ navigation }) {
                       >
                         <Icon size={18} color={v.accent} />
                       </View>
-                      <View
-                        className="rounded-full px-2 py-1"
-                        style={{ backgroundColor: v.tint }}
-                      >
-                        <Text style={{ color: v.accent, fontWeight: '900', fontSize: 8.5 }} numberOfLines={1}>
-                          {v.badge}
-                        </Text>
-                      </View>
+                      {v.badge ? (
+                        <View
+                          className="rounded-full px-2 py-1"
+                          style={{ backgroundColor: v.tint }}
+                        >
+                          <Text style={{ color: v.accent, fontWeight: '900', fontSize: 8.5 }} numberOfLines={1}>
+                            {v.badge}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                     <Text style={{ color: tokens.text, fontWeight: '800', fontSize: 15 }} numberOfLines={1}>
                       {v.title}
                     </Text>
-                    <Text style={{ color: tokens.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+                    <Text style={{ color: tokens.textMuted, fontSize: 11, marginTop: 2, paddingRight: 34 }} numberOfLines={2}>
                       {v.sub}
                     </Text>
+                    {/* Round accent arrow button, bottom-right (screenshot style). */}
                     <View
-                      className="rounded-full mt-3"
-                      style={{ width: 38, height: 3, backgroundColor: v.accent }}
-                    />
+                      style={{
+                        position: 'absolute',
+                        right: 12,
+                        bottom: 12,
+                        height: 30,
+                        width: 30,
+                        borderRadius: 15,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: v.accent,
+                      }}
+                    >
+                      <ArrowRight size={16} color="#FFFFFF" />
+                    </View>
                   </LinearGradient>
                 </Pressable>
               );
@@ -498,12 +556,28 @@ export default function HomeScreen({ navigation }) {
                 className="rounded-2xl p-3 active:opacity-90 flex-row items-center"
                 style={{ backgroundColor: tokens.card, borderWidth: 1, borderColor: tokens.border }}
               >
-                <View
-                  className="h-12 w-12 rounded-xl items-center justify-center mr-3"
-                  style={{ backgroundColor: tokens.primarySoft }}
-                >
-                  <Smartphone size={22} color={tokens.primary} />
-                </View>
+                {(() => {
+                  // Best-effort device photo. The customer-order payload does
+                  // not yet carry an image URL, so this falls back to the icon
+                  // until the backend includes one of these fields.
+                  const p = ongoing.payload || {};
+                  const thumb = p.deviceImageUrl || p.deviceImage || p.imageUrl || p.masterImageUrl || ongoing.imageUrl || null;
+                  return thumb ? (
+                    <Image
+                      source={{ uri: thumb }}
+                      className="mr-3"
+                      style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: tokens.primarySoft }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View
+                      className="h-12 w-12 rounded-xl items-center justify-center mr-3"
+                      style={{ backgroundColor: tokens.primarySoft }}
+                    >
+                      <Smartphone size={22} color={tokens.primary} />
+                    </View>
+                  );
+                })()}
                 <View className="flex-1 pr-2">
                   <Text className="text-[10px] font-extrabold mb-0.5" style={{ color: tokens.primary, letterSpacing: 1 }}>
                     ONGOING
@@ -533,116 +607,63 @@ export default function HomeScreen({ navigation }) {
               no horizontal scroll — the customer sees the full list without
               scrolling sideways. Falls back to the empty state when the
               admin hasn't published any categories yet. */}
-          <SectionHeader title="What are you looking for?" />
+          <SectionHeader
+            title="What are you looking for?"
+            action="View all"
+            onAction={() => navigation.navigate('Repair')}
+          />
           {categories.length === 0 ? (
             <View className="px-4">
               <EmptyState title="No categories yet" description="Device categories will appear here once published." />
             </View>
           ) : (
-            <View className="px-4">
-              <View
-                className="rounded-2xl flex-row flex-wrap"
-                style={{
-                  backgroundColor: tokens.card,
-                  borderWidth: 1,
-                  borderColor: tokens.border,
-                  paddingVertical: 8,
-                  paddingHorizontal: 4,
-                }}
-              >
-                {categories.map((c) => {
-                  const meta = CODE_META[(c.code || '').toUpperCase()] || DEFAULT_META;
-                  const Icon = meta.icon;
-                  const uri = imgUri(c);
-                  return (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => openCategory(c)}
-                      className="items-center active:opacity-80"
-                      style={{ width: '33.333%', paddingVertical: 10, paddingHorizontal: 4 }}
-                    >
-                      <View
-                        className="rounded-full items-center justify-center overflow-hidden"
-                        style={{
-                          width: 64,
-                          height: 64,
-                          backgroundColor: meta.tint,
-                        }}
-                      >
-                        {uri ? (
-                          <Image
-                            source={{ uri }}
-                            style={{ width: '78%', height: '78%' }}
-                            resizeMode="contain"
-                          />
-                        ) : (
-                          <Icon size={26} color={meta.color} />
-                        )}
-                      </View>
-                      <Text
-                        className="text-[11px] font-bold text-text text-center mt-2"
-                        numberOfLines={1}
-                      >
-                        {c.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          )}
-
-          {/* Offers — horizontally-scrollable colourful cards. Zomato/Swiggy
-              banner-strip vibe; each tile deep-links to the relevant vertical. */}
-          <SectionHeader
-            title="Offers for you"
-            action="See all"
-            onAction={() => navigation.navigate('Repair')}
-          />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 12 }}
-          >
-            {OFFERS.map((o) => {
-              const Icon = o.icon;
-              const target = o.key === 'exch' ? 'Sell' : 'Repair';
-              return (
-                <Pressable
-                  key={o.key}
-                  onPress={() => navigation.navigate(target)}
-                  className="rounded-2xl p-3 mx-1 active:opacity-90"
-                  style={{ width: offerW, backgroundColor: o.bg }}
-                >
-                  <View className="flex-row items-center">
-                    <View
-                      className="h-10 w-10 rounded-full items-center justify-center mr-3"
-                      style={{ backgroundColor: tokens.card }}
-                    >
-                      <Icon size={20} color={o.tint} />
-                    </View>
-                    <View className="flex-1">
-                      <Text className="text-[13px] font-extrabold text-text" numberOfLines={1}>
-                        {o.title}
-                      </Text>
-                      <Text className="text-[11px] text-text-muted mt-0.5" numberOfLines={1}>
-                        {o.sub}
-                      </Text>
-                    </View>
-                  </View>
-                  <View
-                    className="self-start flex-row items-center mt-3 rounded-full px-3 py-1.5"
-                    style={{ backgroundColor: tokens.card }}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 2, paddingBottom: 4 }}
+            >
+              {categories.map((c) => {
+                const meta = CODE_META[(c.code || '').toUpperCase()] || DEFAULT_META;
+                const Icon = meta.icon;
+                const uri = imgUri(c);
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => openCategory(c)}
+                    className="items-center active:opacity-80"
+                    style={{ width: 78, marginHorizontal: 4 }}
                   >
-                    <Text className="text-[11px] font-extrabold mr-0.5" style={{ color: o.tint }}>
-                      {o.cta}
+                    <View
+                      className="rounded-full items-center justify-center overflow-hidden"
+                      style={{
+                        width: 66,
+                        height: 66,
+                        backgroundColor: meta.tint,
+                        borderWidth: 1,
+                        borderColor: tokens.border,
+                      }}
+                    >
+                      {uri ? (
+                        <Image
+                          source={{ uri }}
+                          style={{ width: '100%', height: '100%' }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Icon size={26} color={meta.color} />
+                      )}
+                    </View>
+                    <Text
+                      className="text-[11px] font-bold text-text text-center mt-2"
+                      numberOfLines={1}
+                    >
+                      {c.name}
                     </Text>
-                    <ChevronRight size={13} color={o.tint} />
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
 
           {/* Nearby shops — image-led ShopCard list. Heading mirrors Zomato's
               "Restaurants in <neighbourhood>" copy so the screen reads like a
@@ -688,6 +709,98 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+// Top-of-feed promo carousel. Paging horizontal scroll over HERO_SLIDES with a
+// shared banner image (assets/hero-banner.png) and animated dot indicators.
+function HeroBanner({ navigation, contentW }) {
+  const [idx, setIdx] = useState(0);
+  const onScroll = (e) => {
+    const w = e.nativeEvent.layoutMeasurement.width || contentW || 1;
+    const i = Math.round(e.nativeEvent.contentOffset.x / w);
+    if (i !== idx) setIdx(i);
+  };
+  return (
+    <View className="mt-3">
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        decelerationRate="fast"
+      >
+        {HERO_SLIDES.map((s) => (
+          <View key={s.key} style={{ width: contentW }} className="px-4">
+            <Pressable
+              onPress={() => navigation.navigate(s.route, s.params)}
+              className="active:opacity-95"
+            >
+              <LinearGradient
+                colors={s.bg}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  borderRadius: 20,
+                  overflow: 'hidden',
+                  minHeight: 156,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: 18,
+                }}
+              >
+                <View style={{ flex: 1.35, paddingRight: 6 }}>
+                  <Text style={{ color: tokens.text, fontWeight: '900', fontSize: 21, lineHeight: 26 }}>
+                    {s.title1}
+                  </Text>
+                  <Text style={{ color: tokens.primary, fontWeight: '900', fontSize: 21, lineHeight: 26 }}>
+                    {s.title2}
+                  </Text>
+                  <Text style={{ color: tokens.textMuted, fontSize: 12, marginTop: 8, lineHeight: 17 }}>
+                    {s.sub}
+                  </Text>
+                  <View
+                    style={{
+                      alignSelf: 'flex-start',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: tokens.primary,
+                      borderRadius: 999,
+                      paddingHorizontal: 16,
+                      paddingVertical: 9,
+                      marginTop: 14,
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 12.5, marginRight: 4 }}>
+                      {s.cta}
+                    </Text>
+                    <ArrowRight size={15} color="#FFFFFF" />
+                  </View>
+                </View>
+                <Image source={HERO_BANNER_IMAGE} style={{ flex: 1, height: 132 }} resizeMode="contain" />
+              </LinearGradient>
+            </Pressable>
+          </View>
+        ))}
+      </ScrollView>
+      {HERO_SLIDES.length > 1 ? (
+        <View className="flex-row justify-center items-center mt-2.5">
+          {HERO_SLIDES.map((_, i) => (
+            <View
+              key={i}
+              style={{
+                width: i === idx ? 18 : 6,
+                height: 6,
+                borderRadius: 3,
+                marginHorizontal: 3,
+                backgroundColor: i === idx ? tokens.primary : tokens.border,
+              }}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

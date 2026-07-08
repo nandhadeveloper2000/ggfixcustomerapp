@@ -52,6 +52,41 @@ export async function customerLogin({ mobile, email, password, otp }) {
 }
 
 /**
+ * Request a login / password-reset OTP for a customer. Email identifiers get a
+ * generated 6-digit code emailed via Resend; mobile identifiers use the default
+ * 123456. The code is stored on the customer row and verified by customer-login
+ * and the reset endpoint. Returns { channel, sent, target, ttlMinutes?, devOtp?, defaultOtp?, email }.
+ */
+export async function requestOtp(identifier) {
+  const isEmail = String(identifier || '').includes('@');
+  const body = isEmail ? { email: identifier } : { mobile: identifier };
+  return await authApi.post('/auth/customer/otp/send', { body });
+}
+
+/**
+ * Verify the OTP and set a new customer password. On success the server returns
+ * a fresh customer session (auto sign-in) which we persist — the caller routes
+ * via onLogin.
+ */
+export async function resetPassword({ identifier, otp, newPassword }) {
+  const isEmail = String(identifier || '').includes('@');
+  const body = { otp, password: newPassword };
+  if (isEmail) body.email = identifier;
+  else body.mobile = identifier;
+  const data = await authApi.post('/auth/customer/forgot-password/reset', { body });
+  const session = {
+    accessToken: data.accessToken,
+    userId: data.userId,
+    fullName: data.fullName,
+    email: data.email,
+    mobile: data.mobile,
+    roles: data.roles || ['CUSTOMER'],
+  };
+  await saveSession(session);
+  return session;
+}
+
+/**
  * Login by SHOP MOBILE NUMBER. Returns a single-shop session — the JWT is
  * locked to one shopId (loginScope=SHOP) and the shop switcher is hidden.
  * Use this when the user wants access to only one specific shop; owner-wide
