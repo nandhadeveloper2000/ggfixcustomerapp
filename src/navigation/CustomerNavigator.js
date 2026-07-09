@@ -260,7 +260,7 @@ export default function CustomerNavigator({ session, onLogout }) {
       <Stack.Screen name="SelectCategory" component={SelectCategoryScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SelectBrand" component={SelectBrandScreen} options={{ title: 'Select Brand' }} />
       <Stack.Screen name="SelectSeries" component={SelectSeriesScreen} options={{ title: 'Select Series' }} />
-      <Stack.Screen name="SelectModel" component={SelectModelScreen} options={{ title: 'Select Model' }} />
+      <Stack.Screen name="SelectModel" component={SelectModelScreen} options={{ title: 'Select Product' }} />
       <Stack.Screen name="SelectVariant" component={SelectVariantScreen} options={{ title: 'Your Device' }} />
 
       {/* Repair flow */}

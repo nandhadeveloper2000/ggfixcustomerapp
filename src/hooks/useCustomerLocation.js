@@ -80,9 +80,16 @@ async function reverseGeocode(lat, lng) {
     clearTimeout(timer);
     if (!res.ok) return null;
     const j = await res.json();
+    // Build "Area, City - PIN" so the current-location line matches the saved
+    // address format and always surfaces the pincode when the geocoder has it.
     const area = j.locality || j.city || j.principalSubdivision;
+    const city = j.city;
     const pin = j.postcode;
-    const label = [pin, area].filter(Boolean).join(', ');
+    const parts = [];
+    if (area) parts.push(area);
+    if (city && city !== area) parts.push(city);
+    const head = parts.join(', ');
+    const label = head && pin ? `${head} - ${pin}` : head || (pin ? String(pin) : '');
     return label || area || null;
   } catch (_) {
     return null;

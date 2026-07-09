@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
@@ -27,6 +27,10 @@ import {
   MessageCircle,
   Headset,
   ArrowRight,
+  Navigation,
+  Plus,
+  Check,
+  X,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar, EmptyState, Loader, ShopCard } from '../../components/rnr';
@@ -199,6 +203,10 @@ export default function HomeScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState([]);
   const [address, setAddress] = useState(null);
+  const [addresses, setAddresses] = useState([]);
+  const [locOpen, setLocOpen] = useState(false);
+  const [gpsMode, setGpsMode] = useState(false);
+  const locPickedRef = useRef(false);
   const [categories, setCategories] = useState([]);
   const [ongoing, setOngoing] = useState(null);
   const [unread, setUnread] = useState(0);
@@ -227,8 +235,11 @@ export default function HomeScreen({ navigation }) {
       setChatUnread((chats || []).reduce((n, t) => n + (t.unreadCount || 0), 0));
       setCartCount((cart || []).reduce((n, it) => n + (it.quantity || 1), 0));
       setCategories(sortByPreferredOrder((c || []).filter((x) => x.isActive !== false)));
+      setAddresses(a || []);
+      // Keep the user's explicit dropdown pick across refocus/refresh; only
+      // auto-select the default address on the very first load.
       const def = a.find((x) => x.isDefault) || a[0] || null;
-      setAddress(def);
+      if (!locPickedRef.current) setAddress(def);
       const active = (orders || []).find((o) => !DONE_STATES.has(String(o.status).toUpperCase()));
       setOngoing(active || (orders || [])[0] || null);
     } finally {
@@ -256,13 +267,14 @@ export default function HomeScreen({ navigation }) {
 
   const firstName = (session?.fullName || 'Customer').split(' ')[0];
   const gpsResolved = gpsLabel && locSource && locSource !== 'default';
-  const locationTop = address
-    ? (address.label || address.tag || 'Home')
-    : gpsResolved ? 'Current Location' : 'Set Location';
+  // Show the GPS "current location" when the user explicitly picked it from
+  // the dropdown, or when there's no saved address to fall back to.
+  const showGps = gpsMode || !address;
+
   // Include the pincode at the end of the address detail line so the
   // header looks like "29a Imperial Road, Cuddalore - 607002" instead of
   // dropping the PIN the customer entered when they saved the address.
-  const locationDetail = address
+  const savedDetail = address
     ? (() => {
         const parts = [address.line1 || address.locality, address.city].filter(Boolean);
         const head = parts.join(', ');
@@ -270,13 +282,42 @@ export default function HomeScreen({ navigation }) {
         if (head && pin) return `${head} - ${pin}`;
         return head || pin || '';
       })()
-    : locating ? 'Detecting…'
-    : gpsResolved ? gpsLabel
-    : 'Tap to detect or pick';
+    : '';
 
-  const onLocationPress = async () => {
-    const ok = await detectGps();
-    if (!ok) navigation.navigate('ManageAddress');
+  const locationTop = showGps
+    ? (locating ? 'Locating…' : 'Current Location')
+    : (address.label || address.tag || 'Home');
+  const locationDetail = showGps
+    ? (locating ? 'Detecting your location…' : gpsResolved ? gpsLabel : 'Tap to detect or pick')
+    : savedDetail;
+
+  // Area label for the "Repair shops in …" heading — follows the ACTIVE
+  // location so picking current location updates the heading (and the shop
+  // list already refetches on the new GPS coords) instead of staying on the
+  // home-default area.
+  const gpsArea = gpsResolved && gpsLabel ? String(gpsLabel).split(/\s*[,-]\s*/)[0].trim() : '';
+  const shopsTitle = showGps
+    ? (gpsArea ? `Repair shops in ${gpsArea}` : 'Repair shops near you')
+    : `Repair shops in ${address.locality || address.city || 'your area'}`;
+
+  // Tapping the pill opens the location dropdown (current location + saved
+  // addresses) instead of silently detecting GPS.
+  const onLocationPress = () => setLocOpen(true);
+  const chooseGps = async () => {
+    locPickedRef.current = true;
+    setGpsMode(true);
+    setLocOpen(false);
+    await detectGps();
+  };
+  const chooseAddress = (a) => {
+    locPickedRef.current = true;
+    setGpsMode(false);
+    setAddress(a);
+    setLocOpen(false);
+  };
+  const addAddress = () => {
+    setLocOpen(false);
+    navigation.navigate('ManageAddress');
   };
 
   const contentW = Math.min(width, MAX_CONTENT_W);
@@ -671,7 +712,7 @@ export default function HomeScreen({ navigation }) {
           {shops.length > 0 ? (
             <>
               <SectionHeader
-                title={address ? `Repair shops in ${address.locality || address.city || 'your area'}` : 'Top repair shops near you'}
+                title={shopsTitle}
                 action="See all"
                 onAction={() => navigation.navigate('NearbyShops')}
               />
@@ -709,7 +750,150 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </ScrollView>
+
+      {/* Location dropdown — current location + saved addresses picker. */}
+      <LocationSheet
+        open={locOpen}
+        onClose={() => setLocOpen(false)}
+        addresses={addresses}
+        activeId={address?.id}
+        gpsMode={gpsMode}
+        gpsLabel={gpsLabel}
+        gpsResolved={gpsResolved}
+        locating={locating}
+        onChooseGps={chooseGps}
+        onChooseAddress={chooseAddress}
+        onAddAddress={addAddress}
+      />
     </View>
+  );
+}
+
+// Location picker bottom-sheet. Opened by tapping the header location pill.
+// Lists "Use current location" (GPS) first with a navigation icon, then every
+// saved address, then an "Add new address" action — the Swiggy/Zomato pattern.
+function LocationSheet({
+  open, onClose, addresses, activeId, gpsMode, gpsLabel, gpsResolved,
+  locating, onChooseGps, onChooseAddress, onAddAddress,
+}) {
+  return (
+    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 justify-end" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={onClose}>
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={{
+            backgroundColor: tokens.card,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            paddingBottom: 28,
+          }}
+        >
+          {/* Grabber */}
+          <View className="items-center pt-3 pb-1">
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: tokens.border }} />
+          </View>
+
+          <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
+            <Text className="text-[16px] font-extrabold text-text">Select location</Text>
+            <Pressable
+              onPress={onClose}
+              className="h-8 w-8 rounded-full items-center justify-center"
+              style={{ backgroundColor: tokens.surfaceMuted }}
+            >
+              <X size={16} color={tokens.text} />
+            </Pressable>
+          </View>
+
+          {/* Use current location */}
+          <Pressable onPress={onChooseGps} className="flex-row items-center px-5 py-3 active:opacity-80">
+            <View
+              className="h-10 w-10 rounded-full items-center justify-center mr-3"
+              style={{ backgroundColor: tokens.primarySoft }}
+            >
+              <Navigation size={18} color={tokens.primary} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-[14px] font-extrabold" style={{ color: tokens.primary }}>
+                Use current location
+              </Text>
+              <Text className="text-[11.5px] text-text-muted mt-0.5" numberOfLines={1}>
+                {locating ? 'Detecting…' : gpsResolved ? gpsLabel : 'Detect via GPS'}
+              </Text>
+            </View>
+            {gpsMode ? (
+              <Check size={18} color={tokens.primary} />
+            ) : (
+              <ChevronRight size={18} color={tokens.textSubtle} />
+            )}
+          </Pressable>
+
+          <View style={{ height: 1, backgroundColor: tokens.border, marginHorizontal: 20, marginVertical: 4 }} />
+
+          {/* Saved addresses */}
+          {addresses.length > 0 ? (
+            <>
+              <Text
+                className="text-[11px] font-extrabold text-text-muted px-5 pt-2 pb-1"
+                style={{ letterSpacing: 0.6 }}
+              >
+                SAVED ADDRESSES
+              </Text>
+              <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
+                {addresses.map((a) => {
+                  const active = !gpsMode && a.id === activeId;
+                  const detail = [a.line1 || a.locality, a.city, a.pincode].filter(Boolean).join(', ');
+                  return (
+                    <Pressable
+                      key={a.id}
+                      onPress={() => onChooseAddress(a)}
+                      className="flex-row items-center px-5 py-3 active:opacity-80"
+                    >
+                      <View
+                        className="h-10 w-10 rounded-full items-center justify-center mr-3"
+                        style={{ backgroundColor: tokens.surfaceMuted }}
+                      >
+                        <MapPin size={18} color={tokens.text} />
+                      </View>
+                      <View className="flex-1">
+                        <View className="flex-row items-center">
+                          <Text className="text-[14px] font-extrabold text-text mr-2" numberOfLines={1}>
+                            {a.label || a.tag || 'Address'}
+                          </Text>
+                          {a.isDefault ? (
+                            <View className="rounded-full px-1.5 py-0.5" style={{ backgroundColor: tokens.primarySoft }}>
+                              <Text className="text-[8.5px] font-extrabold" style={{ color: tokens.primary }}>
+                                DEFAULT
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text className="text-[11.5px] text-text-muted mt-0.5" numberOfLines={1}>
+                          {detail}
+                        </Text>
+                      </View>
+                      {active ? <Check size={18} color={tokens.primary} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          ) : null}
+
+          {/* Add new address */}
+          <Pressable onPress={onAddAddress} className="flex-row items-center px-5 py-3 mt-1 active:opacity-80">
+            <View
+              className="h-10 w-10 rounded-full items-center justify-center mr-3"
+              style={{ backgroundColor: tokens.surfaceMuted, borderWidth: 1, borderColor: tokens.border }}
+            >
+              <Plus size={18} color={tokens.primary} />
+            </View>
+            <Text className="text-[14px] font-extrabold" style={{ color: tokens.primary }}>
+              Add new address
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 

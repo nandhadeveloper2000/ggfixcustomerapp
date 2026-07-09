@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
-import { CheckCircle2, Pencil } from 'lucide-react-native';
-import { EmptyState, Loader, SearchBar, SelectionCrumb } from '../../../components/rnr';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CheckCircle2, Pencil, Search, ArrowLeft, X } from 'lucide-react-native';
+import { EmptyState, Loader } from '../../../components/rnr';
 import { getBrandsForCategory } from '../../../api/masterData';
+import { resolveDeviceImageSource } from '../../../utils/images';
 
 const BRAND_PALETTES = [
   { bg: 'bg-primary/10',   text: 'text-primary' },
@@ -27,8 +29,28 @@ export default function SelectBrandScreen({ navigation, route }) {
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const isEditing = !!editSellOrderId;
   const currentBrandId = editHints?.brandId || null;
+  const insets = useSafeAreaInsets();
+
+  // Header: title + right-side search icon.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'Select Brand',
+      headerRight: () => (
+        <Pressable onPress={() => setSearchOpen(true)} hitSlop={8} style={{ paddingHorizontal: 6 }}>
+          <Search size={22} color="#0F172A" />
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+
+  // Hide the navigator header while searching for a full-screen search bar.
+  useEffect(() => {
+    navigation.setOptions({ headerShown: !searchOpen });
+    return () => navigation.setOptions({ headerShown: true });
+  }, [navigation, searchOpen]);
 
   useEffect(() => {
     (async () => {
@@ -37,36 +59,100 @@ export default function SelectBrandScreen({ navigation, route }) {
     })();
   }, [categoryId]);
 
-  const filtered = useMemo(() => {
-    let list = brands;
-    // While editing, surface the current brand at the top of the list so the
-    // customer can confirm or change it without scrolling.
+  const gridBrands = useMemo(() => {
     if (isEditing && currentBrandId) {
       const current = brands.find((b) => b.id === currentBrandId);
       const rest = brands.filter((b) => b.id !== currentBrandId);
-      list = current ? [current, ...rest] : brands;
+      return current ? [current, ...rest] : brands;
     }
-    if (!q.trim()) return list;
-    return list.filter((b) => (b.name || '').toLowerCase().includes(q.toLowerCase()));
-  }, [brands, q, isEditing, currentBrandId]);
+    return brands;
+  }, [brands, isEditing, currentBrandId]);
 
-  const onPick = (b) => navigation.navigate('SelectSeries', {
+  const searchResults = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return brands;
+    return brands.filter((b) => (b.name || '').toLowerCase().includes(needle));
+  }, [brands, q]);
+
+  const onPick = (b) => navigation.navigate('SelectModel', {
     flow, categoryId, categoryCode, categoryName, deviceTypeId, deviceTypeName,
     brandId: b.id, brandName: b.name,
     editSellOrderId, editHints,
   });
 
-  const crumbs = [{ label: 'Category', value: categoryName }];
-  if (deviceTypeName) crumbs.push({ label: 'Device', value: deviceTypeName });
+  // ── Full-screen search mode ───────────────────────────────────────────────
+  if (searchOpen) {
+    return (
+      <View className="flex-1 bg-background">
+        <View
+          className="flex-row items-center px-2 pb-2 bg-card border-b border-border"
+          style={{ paddingTop: insets.top + 8 }}
+        >
+          <Pressable
+            onPress={() => { setSearchOpen(false); setQ(''); }}
+            className="h-10 w-10 items-center justify-center"
+            hitSlop={8}
+          >
+            <ArrowLeft size={22} color="#0F172A" />
+          </Pressable>
+          <View className="flex-1 flex-row items-center rounded-xl px-3" style={{ backgroundColor: '#EEF2F6' }}>
+            <Search size={18} color="#94A3B8" />
+            <TextInput
+              autoFocus
+              value={q}
+              onChangeText={setQ}
+              placeholder="Search brand"
+              placeholderTextColor="#94A3B8"
+              className="flex-1 py-2.5 ml-2 text-text text-[14px]"
+              returnKeyType="search"
+            />
+            {q ? (
+              <Pressable onPress={() => setQ('')} hitSlop={8}>
+                <X size={18} color="#64748B" />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+          {searchResults.length === 0 ? (
+            <EmptyState title="No brands found" description={q ? `Nothing matches "${q.trim()}".` : 'Start typing to search.'} />
+          ) : (
+            searchResults.map((b) => {
+              const logo = resolveDeviceImageSource({ url: b.imageUrl, base64: b.imageBase64 });
+              const palette = paletteFor(b.name);
+              return (
+                <Pressable
+                  key={b.id}
+                  onPress={() => onPick(b)}
+                  className="flex-row items-center px-4 py-2.5 border-b border-border active:bg-primary/5"
+                >
+                  <View className="h-10 w-10 rounded-lg overflow-hidden bg-white border border-border items-center justify-center mr-3">
+                    {logo ? (
+                      <Image source={{ uri: logo }} style={{ width: 32, height: 32 }} resizeMode="contain" />
+                    ) : (
+                      <View className={`h-10 w-10 items-center justify-center ${palette.bg}`}>
+                        <Text className={`text-[14px] font-extrabold ${palette.text}`}>{(b.name || '?').slice(0, 1).toUpperCase()}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text className="flex-1 text-[14px] text-text" numberOfLines={1}>{b.name}</Text>
+                </Pressable>
+              );
+            })
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
 
   if (loading) return <Loader label="Loading brands..." />;
 
+  // ── Normal mode ───────────────────────────────────────────────────────────
   return (
     <View className="flex-1 bg-background">
-      <View className="bg-card border-b border-border px-4 pt-3 pb-3">
-        <SelectionCrumb items={crumbs} className="mb-3" />
-        {isEditing && editHints?.modelName ? (
-          <View className="bg-warning/10 border border-warning/30 rounded-xl px-3 py-2 mb-3 flex-row items-center">
+      {isEditing && editHints?.modelName ? (
+        <View className="bg-card border-b border-border px-4 pt-3 pb-3">
+          <View className="bg-warning/10 border border-warning/30 rounded-xl px-3 py-2 flex-row items-center">
             <Pencil size={13} color="#F59E0B" />
             <View className="flex-1 ml-2">
               <Text className="text-[10px] font-extrabold text-warning tracking-wider">EDITING ORDER</Text>
@@ -75,26 +161,18 @@ export default function SelectBrandScreen({ navigation, route }) {
               </Text>
             </View>
           </View>
-        ) : null}
-        <SearchBar value={q} onChangeText={setQ} placeholder="Search brand" onClear={() => setQ('')} />
-      </View>
+        </View>
+      ) : null}
 
       <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 24 }}>
-        {filtered.length === 0 ? (
-          <EmptyState
-            title="No brands found"
-            description={q ? `We don't recognize "${q}".` : 'No brands mapped to this category yet.'}
-          />
+        {gridBrands.length === 0 ? (
+          <EmptyState title="No brands found" description="No brands mapped to this category yet." />
         ) : (
-          // 3-column grid — matches the Home "What are you looking for?"
-          // rhythm. Each tile shows the brand logo (or initial pill) above the
-          // name. Tap → SelectSeries with the same payload the list version
-          // forwarded. No chevron arrow per the customer-facing redesign.
           <View className="flex-row flex-wrap">
-            {filtered.map((b) => {
+            {gridBrands.map((b) => {
               const palette = paletteFor(b.name);
               const initial = (b.name || '?').slice(0, 1).toUpperCase();
-              const logo = b.imageUrl || b.imageBase64;
+              const logo = resolveDeviceImageSource({ url: b.imageUrl, base64: b.imageBase64 });
               const isCurrent = isEditing && b.id === currentBrandId;
               return (
                 <Pressable
@@ -116,15 +194,13 @@ export default function SelectBrandScreen({ navigation, route }) {
                       elevation: 1,
                     }}
                   >
-                    {/* App-icon style: the logo fills the rounded tile so each
-                        brand's own artwork (incl. the dark logos that ship on a
-                        black background) reads as a clean icon instead of a
-                        black square floating on a white box. */}
-                    <View className="h-14 w-14 rounded-2xl items-center justify-center overflow-hidden border border-border">
+                    {/* Contain (not cover) so wide wordmarks show in full. White
+                        box keeps transparent PNG logos clean on every device. */}
+                    <View className="h-16 w-16 rounded-2xl items-center justify-center overflow-hidden bg-white border border-border">
                       {logo ? (
-                        <Image source={{ uri: logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        <Image source={{ uri: logo }} style={{ width: 54, height: 54 }} resizeMode="contain" />
                       ) : (
-                        <View className={`h-14 w-14 items-center justify-center ${palette.bg}`}>
+                        <View className={`h-16 w-16 items-center justify-center ${palette.bg}`}>
                           <Text className={`text-[20px] font-extrabold ${palette.text}`}>{initial}</Text>
                         </View>
                       )}
