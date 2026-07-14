@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { confirm, notify } from '../../../components/confirm';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,11 +17,13 @@ import {
   Pencil,
   ShieldCheck,
   Bell,
+  Fingerprint,
 } from 'lucide-react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearSession as clearAuth, selectSession } from '../../../store/authSlice';
 import { clearSession } from '../../../auth/session';
 import { Avatar } from '../../../components/rnr';
+import { isAppLockEnabled, setAppLockEnabled, isDeviceSecure, authenticate } from '../../../auth/appLock';
 
 const GREEN = '#16A34A';
 const GREEN_LIGHT = '#22C55E';
@@ -77,6 +79,62 @@ function Row({ item, onPress, last, right }) {
         <ChevronRight size={16} color="#94A3B8" style={{ marginLeft: 6 }} />
       </View>
     </Pressable>
+  );
+}
+
+// App Lock toggle row — styled to match the customer app's menu rows. Requires
+// the device fingerprint / pattern / PIN to open the app. Fails OPEN when the
+// device has no lock (we tell the user to set one first).
+function AppLockRow() {
+  const [on, setOn] = useState(false);
+  const [ready, setReady] = useState(false);
+  useEffect(() => { (async () => { setOn(await isAppLockEnabled()); setReady(true); })(); }, []);
+  const toggle = async (next) => {
+    if (next) {
+      if (!(await isDeviceSecure())) {
+        Alert.alert('Set a screen lock', 'Add a fingerprint, pattern or PIN in your phone settings first, then turn on App Lock.');
+        return;
+      }
+      if (!(await authenticate())) return;
+    }
+    await setAppLockEnabled(next);
+    setOn(next);
+  };
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+      }}
+    >
+      <View
+        style={{
+          height: 36, width: 36, borderRadius: 18,
+          backgroundColor: '#DCFCE7',
+          alignItems: 'center', justifyContent: 'center',
+          marginRight: 12,
+        }}
+      >
+        <Fingerprint size={16} color={GREEN_DARK} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>
+          App Lock
+        </Text>
+        <Text numberOfLines={1} style={{ fontSize: 11.5, color: '#64748B', marginTop: 1 }}>
+          Require fingerprint / pattern / PIN to open
+        </Text>
+      </View>
+      <Switch
+        value={on}
+        onValueChange={toggle}
+        disabled={!ready}
+        trackColor={{ true: GREEN, false: '#CBD5E1' }}
+        thumbColor="#FFFFFF"
+      />
+    </View>
   );
 }
 
@@ -204,6 +262,26 @@ export default function ProfileScreen({ navigation, onLogout: parentLogout }) {
               last={idx === ACCOUNT.length - 1}
             />
           ))}
+        </View>
+
+        <Text
+          style={{
+            fontSize: 10.5, fontWeight: '800', color: '#64748B',
+            paddingHorizontal: 20, marginTop: 18, marginBottom: 8, letterSpacing: 1.2,
+          }}
+        >
+          SECURITY
+        </Text>
+        <View
+          style={{
+            marginHorizontal: 16, backgroundColor: '#fff',
+            borderRadius: 18, overflow: 'hidden',
+            borderWidth: 1, borderColor: '#F1F5F9',
+            shadowColor: '#0F172A', shadowOpacity: 0.04,
+            shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2,
+          }}
+        >
+          <AppLockRow />
         </View>
 
         <Text
