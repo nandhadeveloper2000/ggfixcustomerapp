@@ -24,7 +24,7 @@ import {
   Loader,
   Badge,
 } from '../../../components/rnr';
-import { getRamOptions, getStorageOptions, getColors } from '../../../api/masterData';
+import { getModelOptions } from '../../../api/masterData';
 import { createSavedDevice, updateSavedDevice } from '../../../api/customer';
 
 const COLOR_SWATCHES = {
@@ -76,6 +76,7 @@ export default function SelectVariantScreen({ navigation, route }) {
 
   const [rams, setRams] = useState([]);
   const [storages, setStorages] = useState([]);
+  const [specs, setSpecs] = useState([]);
   const [colorsList, setColorsList] = useState([]);
 
   const editHints = route?.params?.editHints || null;
@@ -95,17 +96,18 @@ export default function SelectVariantScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // When a model's variants are storage-only ("128 GB", no "+"), the picker shows
+  // a single Storage grid and doesn't require a RAM selection.
+  const specsStorageOnly = specs.length > 0 && specs.every((sp) => sp.storageOnly);
+
   useEffect(() => {
     (async () => {
       try {
-        const [r, s, c] = await Promise.all([
-          getRamOptions(),
-          getStorageOptions(),
-          getColors().catch(() => []),
-        ]);
-        setRams(r);
-        setStorages(s);
-        setColorsList(c.length ? c : [
+        const opts = await getModelOptions(modelId);
+        // Prefer THIS model's configured colors + RAM/storage variants; fall back
+        // to the full master lists (then a hardcoded color list) when nothing is set.
+        const cs = opts.colors.length ? opts.colors : opts.allColors;
+        setColorsList(cs.length ? cs : [
           { id: 'Midnight Black', name: 'Midnight Black' },
           { id: 'Phantom Silver', name: 'Phantom Silver' },
           { id: 'Cosmic Blue', name: 'Cosmic Blue' },
@@ -113,6 +115,9 @@ export default function SelectVariantScreen({ navigation, route }) {
           { id: 'Starlight', name: 'Starlight' },
           { id: 'Alpine Green', name: 'Alpine Green' },
         ]);
+        setSpecs(opts.specs);
+        setRams(opts.allRams);
+        setStorages(opts.allStorages);
       } catch (_) {}
       setLoading(false);
     })();
@@ -132,7 +137,7 @@ export default function SelectVariantScreen({ navigation, route }) {
 
   const onContinue = async () => {
     if (!color) return;
-    if (!noRamStorage && (!ram || !storage)) return;
+    if (!noRamStorage && (!storage || (!specsStorageOnly && !ram))) return;
 
     // Only send UUID-typed fields the backend can parse. Hardcoded category
     // codes like 'SMARTPHONE' (from Home tiles / fallback list) would fail
@@ -201,7 +206,7 @@ export default function SelectVariantScreen({ navigation, route }) {
 
   const ready =
     color &&
-    (noRamStorage || (ram && storage)) &&
+    (noRamStorage || (storage && (specsStorageOnly || ram))) &&
     (flow !== 'SELL' || noImei || imei.trim());
   const ctaLabel = flow === 'PROFILE'
     ? (isEdit ? 'Update Device' : 'Save Device')
@@ -287,7 +292,7 @@ export default function SelectVariantScreen({ navigation, route }) {
             {colorsList.map((c) => {
               const name = c.name || c.id;
               const active = color?.name === name || color?.id === name;
-              const sw = swatchFor(name);
+              const sw = c.hexCode || swatchFor(name);
               return (
                 <View key={c.id || name} className="p-1" style={{ width: '33.333%' }}>
                   <Pressable
@@ -315,8 +320,43 @@ export default function SelectVariantScreen({ navigation, route }) {
           </View>
         </View>
 
-        {/* RAM */}
-        {!noRamStorage ? (
+        {/* Model variants — RAM + Storage combos, or storage-only sizes the model ships */}
+        {!noRamStorage && specs.length > 0 ? (
+        <View className="bg-card border border-border rounded-2xl p-3 mb-3">
+          <View className="flex-row items-center mb-2.5">
+            <View className="h-8 w-8 rounded-full bg-primary/10 items-center justify-center mr-2">
+              <HardDrive size={14} color="#00008B" />
+            </View>
+            <Text className="text-[13px] font-extrabold text-text flex-1">{specsStorageOnly ? 'Storage' : 'RAM & Storage'}</Text>
+            <Text className="text-[11px] text-text-muted">Variant</Text>
+          </View>
+          <View className="flex-row flex-wrap -mx-1">
+            {specs.map((sp) => {
+              const active = sp.storageOnly
+                ? storage?.id === sp.storageOptionId
+                : (ram?.id === sp.ramOptionId && storage?.id === sp.storageOptionId);
+              return (
+                <View key={sp.id} className="p-1" style={{ width: '50%' }}>
+                  <Pressable
+                    onPress={() => {
+                      setRam(sp.storageOnly ? null : { id: sp.ramOptionId, label: sp.ramLabel });
+                      setStorage({ id: sp.storageOptionId, label: sp.storageLabel });
+                    }}
+                    className={`rounded-xl border py-3 items-center ${active ? 'bg-primary border-primary' : 'bg-card border-border'}`}
+                  >
+                    <Text className={`text-[14px] font-extrabold ${active ? 'text-white' : 'text-text'}`} numberOfLines={1}>
+                      {sp.label}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+        ) : null}
+
+        {/* RAM (fallback: model has no variants configured) */}
+        {!noRamStorage && specs.length === 0 ? (
         <View className="bg-card border border-border rounded-2xl p-3 mb-3">
           <View className="flex-row items-center mb-2.5">
             <View className="h-8 w-8 rounded-full bg-primary/10 items-center justify-center mr-2">
@@ -343,8 +383,8 @@ export default function SelectVariantScreen({ navigation, route }) {
         </View>
         ) : null}
 
-        {/* Storage */}
-        {!noRamStorage ? (
+        {/* Storage (fallback) */}
+        {!noRamStorage && specs.length === 0 ? (
         <View className="bg-card border border-border rounded-2xl p-3 mb-3">
           <View className="flex-row items-center mb-2.5">
             <View className="h-8 w-8 rounded-full bg-secondary/10 items-center justify-center mr-2">
